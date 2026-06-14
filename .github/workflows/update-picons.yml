@@ -1,0 +1,80 @@
+name: Update Picons
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *'
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-picons
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y --no-install-recommends --no-install-suggests git xz-utils binutils pngquant imagemagick librsvg2-bin jq
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Restore pngs from gh-pages
+        run: |
+          mkdir -p pngs info
+          if git ls-remote --exit-code origin gh-pages; then
+            git clone --depth 1 --branch gh-pages \
+              https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} \
+              _gh-pages
+            find _gh-pages -maxdepth 1 -name "*.png" -exec cp {} pngs/ \;
+            [ -d _gh-pages/info ] && cp -r _gh-pages/info/. info/ || true
+            rm -rf _gh-pages
+          fi
+
+      - name: Checkout picons source
+        uses: actions/checkout@v4
+        with:
+          repository: picons/picons
+          sparse-checkout: build-source
+          path: picons-source
+
+      - name: Sync build-source
+        run: rsync -a --delete picons-source/build-source/ build-source/
+
+      - name: Remove outdated pngs
+        run: |
+          git diff --name-only HEAD -- build-source/logos/ \
+            | sed 's|build-source/logos/||; s/\.\(default\|light\|dark\|white\)\.\(png\|svg\)$//' \
+            | sort -u \
+            | xargs -r -I{} rm -f "pngs/{}.png"
+
+      - name: Build picons
+        run: bash 2-build-picons.sh 400x240 370x210 light transparent
+
+      - name: Commit build-source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add build-source/
+          git diff --staged --quiet || git commit -m "Update build-source"
+          git push
+
+      - name: Prepare GitHub Pages content
+        run: |
+          mkdir -p pages/info
+          cp pngs/*.png pages/
+          cp info/files.md5 info/files.map pages/info/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pages
+          force_orphan: true
