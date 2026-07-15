@@ -155,7 +155,12 @@ grep -v -e '^#' -e '^$' "$location/build-source/$style.index" | awk -F= '$1 != $
 ## Generate MD5 hash file           ##
 ######################################
 echo "$(date +'%H:%M:%S') - EXECUTING: Generating MD5 hashes"
-find "$pngs" -maxdepth 1 -name "*.png" | sort | xargs md5sum > "$info/files.md5"
+find "$pngs" -maxdepth 1 -name "*.png" -print0 |
+sort -z |
+while IFS= read -r -d '' file; do
+    md5=$(md5sum "$file" | cut -d' ' -f1)
+    printf '%s  %s\n' "$md5" "$(basename "$file")"
+done > "$info/files.md5"
 
 ######################################
 ## Cleanup temporary files and exit ##
